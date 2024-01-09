@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -21,8 +22,9 @@ func errExit(err error) {
 }
 
 func main() {
+	ctx := context.Background()
 	sayArgs := validateArgs()
-	rd, err := say.ReaderForFile(sayArgs.filename)
+	rd, err := say.ReaderForFile(ctx, sayArgs.filename, 0)
 	errExit(err)
 
 	const numChars = 20

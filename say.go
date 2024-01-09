@@ -1,49 +1,39 @@
 package say
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/cocktailrobots/say/reader/wav"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/cocktailrobots/say/reader"
-	"github.com/cocktailrobots/say/reader/wav"
 	"github.com/ebitengine/oto/v3"
 )
 
-func ReaderForFile(filename string) (reader.SayReader, error) {
+type AudioFileType int
+
+const (
+	AudioFileTypeWav AudioFileType = iota
+)
+
+func ReaderForFile(ctx context.Context, filename string, preloadDuration time.Duration) (reader.SayReader, error) {
+	var f *os.File
 	if filepath.Ext(filename) == ".wav" {
-		f, err := openFile(filename)
+		var err error
+		f, err = openFile(filename)
 		if err != nil {
 			return nil, err
 		}
 
-		wavRd := wav.NewReader(f)
-		wavRd.Start()
-
-		for {
-			if wavRd.BytesAvailable() < wav.HdrSize {
-				time.Sleep(time.Millisecond)
-			} else {
-				break
-			}
-		}
-
-		n, err := wavRd.Read(make([]byte, wav.HdrSize))
-		if err != nil {
-			wavRd.Close()
-			return nil, fmt.Errorf("failed to read header: %w", err)
-		} else if n != wav.HdrSize {
-			wavRd.Close()
-			return nil, fmt.Errorf("failed to read header: short read of %n bytes instead of %n", n, wav.HdrSize)
-		}
-
-		return wavRd, nil
+		return ReaderForStream(ctx, f, AudioFileTypeWav, preloadDuration)
 	} else {
 		return nil, fmt.Errorf("unsupported file type '%s'", filepath.Ext(filename))
 	}
+
 }
 
 func openFile(filename string) (*os.File, error) {
@@ -53,6 +43,22 @@ func openFile(filename string) (*os.File, error) {
 	}
 
 	return f, nil
+}
+
+func ReaderForStream(ctx context.Context, rc io.ReadCloser, fileType AudioFileType, preloadDuration time.Duration) (reader.SayReader, error) {
+	switch fileType {
+	case AudioFileTypeWav:
+		rdr := wav.NewReader(rc)
+		err := rdr.Start(ctx, preloadDuration)
+		if err != nil {
+			rdr.Close()
+			return nil, fmt.Errorf("failed to start wav reader: %w", err)
+		}
+
+		return rdr, nil
+	default:
+		return nil, fmt.Errorf("unsupported file type '%d'", fileType)
+	}
 }
 
 func PlayWithCallback(rdr reader.SayReader, sleepDur time.Duration, cb func(amplitude float64) error) error {

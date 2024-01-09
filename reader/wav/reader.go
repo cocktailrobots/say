@@ -1,9 +1,11 @@
 package wav
 
 import (
+	"context"
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/cocktailrobots/say/reader"
 	"github.com/ebitengine/oto/v3"
@@ -30,10 +32,16 @@ func NewReader(rc io.ReadCloser) *Reader {
 	}
 }
 
-func (r *Reader) Start() {
+func (r *Reader) Start(ctx context.Context, preloadDuration time.Duration) error {
 	const bufSize = 128 * 1024
 	go func() {
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			buf := make([]byte, bufSize)
 			n, err := r.inStr.Read(buf)
 
@@ -56,6 +64,41 @@ func (r *Reader) Start() {
 			}
 		}
 	}()
+
+	err := r.waitForData(ctx, HdrSize)
+	if err != nil {
+		return err
+	}
+
+	if preloadDuration > 0 {
+		durPerSample := time.Second / time.Duration(r.GetSampleRate())
+		sampleSize := 2 * int64(r.GetNumChans())
+		loadSize := sampleSize * int64(preloadDuration/durPerSample)
+
+		if loadSize > 0 {
+			return r.waitForData(ctx, loadSize)
+		}
+	}
+
+	return nil
+}
+
+func (r *Reader) waitForData(ctx context.Context, size int64) error {
+	for {
+		if int64(r.BytesAvailable()) < size {
+			time.Sleep(time.Millisecond)
+		} else {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+
+	return nil
 }
 
 func (r *Reader) Read(p []byte) (n int, err error) {
